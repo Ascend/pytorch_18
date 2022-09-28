@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import wraps
+from functools import wraps, partialmethod
 
 import logging
 import inspect
@@ -74,6 +74,46 @@ def instantiate_tests(arg=None, **kwargs):
 
     return wrapper(arg)
 
+
+def gen_ops_testcase(cls, func, name, keys, value, op_info):
+    new_kwargs = {}
+    test_name = func.__name__ + '_' + name
+
+    for k, v in zip(keys, value):
+        if k == "npu_format":
+            test_name += ("_" + str(v))
+        if k == "dtype":
+            test_name += ("_" + str(v).split('.')[1])
+        new_kwargs[k] = v
+
+    new_kwargs['op'] = op_info  
+    new_func = partialmethod(func, **new_kwargs)
+    setattr(cls, test_name, new_func)
+
+
+def instantiate_ops_tests(op_db):
+
+    def wrapper(cls):
+        testcases = [x for x in dir(cls) if x.startswith('test_')]
+        for testcase in testcases:
+            if hasattr(cls, testcase):
+                func = getattr(cls, testcase)
+                for op_info in op_db:
+                    data = {}
+                    data['dtype'] = func.dtypes if hasattr(func, "dtypes") else op_info.dtypesIfNPU
+                    data['npu_format'] = func.formats if hasattr(func, "formats") else op_info.formats
+                    
+                    keys = data.keys()
+                    values = [data.get(key) for key in keys]
+                    for value in itertools.product(*values):
+                        gen_ops_testcase(cls, func, op_info.name, keys, value, op_info)
+
+                delattr(cls, testcase)
+        return cls
+        
+    return wrapper
+
+
 def graph_mode(func):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.info("graph mode on")
@@ -84,6 +124,7 @@ def graph_mode(func):
         logging.info("graph mode off")
         torch.npu.disable_graph_mode()
     return wrapper
+
 
 class Dtypes(object):
 
