@@ -16,6 +16,7 @@
 
 from functools import wraps, partialmethod
 
+import os
 import logging
 import inspect
 import itertools
@@ -115,14 +116,19 @@ def instantiate_ops_tests(op_db):
 
 
 def graph_mode(func):
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logging.info("graph mode on")
+    if os.getenv("GRAPH_MODE_TEST") == '1':
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logging.info("graph mode on")
+        def wrapper(*args, **kw):
+            logging.info("runing: {}".format(func.__name__))
+            torch.npu.enable_graph_mode()
+            func(*args, **kw)
+            logging.info("graph mode off")
+            torch.npu.disable_graph_mode()
+        return wrapper
+    
     def wrapper(*args, **kw):
-        logging.info("runing: {}".format(func.__name__))
-        torch.npu.enable_graph_mode()
         func(*args, **kw)
-        logging.info("graph mode off")
-        torch.npu.disable_graph_mode()
     return wrapper
 
 

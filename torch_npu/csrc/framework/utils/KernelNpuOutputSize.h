@@ -302,9 +302,7 @@ tuple<c10::IntArrayRef, c10::IntArrayRef,c10::IntArrayRef> slow_conv_transpose2d
     c10::IntArrayRef stride,
     c10::IntArrayRef padding,
     c10::IntArrayRef output_padding,
-    c10::IntArrayRef dilation,
-    const at::Tensor& columns,
-    const at::Tensor& ones);
+    c10::IntArrayRef dilation);
 
 c10::IntArrayRef smooth_l1_loss_npu_output_size(
     const at::Tensor& self,
@@ -359,6 +357,15 @@ c10::SmallVector<int64_t, SIZE> var_npu_output_size(
     const at::Tensor& self,
     c10::IntArrayRef dim,
     bool keepdim);
+
+c10::SmallVector<int64_t, SIZE> crop_and_resize_npu_output_size(
+    const at::Tensor &self,
+    const at::Tensor &boxes,
+    at::IntArrayRef crop_size);
+
+c10::SmallVector<int64_t, SIZE> decode_jpeg_npu_output_size(
+    at::IntArrayRef image_shape,
+    int64_t channels);
 
 } // namespace native
 } // namespace at_npu
