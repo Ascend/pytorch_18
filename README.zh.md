@@ -69,8 +69,8 @@ pip3 install torch==1.11.0+cpu #若使用pip命令安装cpu版本PyTorch报错�
 编译生成pytorch插件的二进制安装包。
 
 ```
-# 下载v1.11.0-3.0.rc3分支代码，进入插件根目录
-git clone -b v1.11.0-3.0.rc3 https://gitee.com/ascend/pytorch.git 
+# 下载v1.11.0分支代码，进入插件根目录
+git clone -b v1.11.0 https://gitee.com/ascend/pytorch.git 
 cd pytorch    
 # 指定python版本编包方式：
 bash ci/build.sh --python=3.7
@@ -189,6 +189,7 @@ Ascend PyTorch的版本分支有以下几种维护阶段：
 | **v2.0.4**   | Maintained   | 2022-01-15           | Unmaintained <br> 2023-01-15 estimated |            |
 | **v3.0.rc1**   | Maintained   | 2022-04-10           | Unmaintained <br> 2023-04-10 estimated |            |
 | **v3.0.rc2**   | Maintained   | 2022-07-15           | Unmaintained <br> 2023-07-15 estimated |            |
+| **v3.0.rc3**   | Maintained   | 2022-10-20           | Unmaintained <br> 2023-10-20 estimated |            |
 
 # FAQ
 
