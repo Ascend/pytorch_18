@@ -18,6 +18,7 @@ import contextlib
 import io
 import logging
 import os
+import pickle
 import time
 import warnings
 from datetime import timedelta
@@ -52,6 +53,8 @@ from torch._C._distributed_c10d import (
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
 
+_pickler = pickle.Pickler
+_unpickler = pickle.Unpickler
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -91,7 +94,7 @@ __all__ = [
     "isend", "irecv", "send", "recv", "P2POp", "batch_isend_irecv", "broadcast", "all_reduce",
     "all_reduce_coalesced", "reduce", "all_gather", "all_gather_coalesced", "gather", "scatter",
     "reduce_scatter", "all_to_all_single", "all_to_all", "barrier", "new_group", "ProcessGroupHCCL",
-    "_get_default_group", "_get_global_rank"
+    "_get_default_group", "_get_global_rank", "all_gather_object"
 ]
 
 # Some reduce ops are not supported by complex numbers and will result in an error.
@@ -1981,3 +1984,107 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             pg._set_sequence_number_for_group()
 
     return pg
+
+def _object_to_tensor(obj):
+    f = io.BytesIO()
+    _pickler(f).dump(obj)
+    byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
+    # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
+    # Otherwise, it will casue 100X slowdown.
+    # See: https://github.com/pytorch/pytorch/issues/65696
+    byte_tensor = torch.ByteTensor(byte_storage)
+    local_size = torch.LongTensor([byte_tensor.numel()])
+    return byte_tensor, local_size
+
+
+def _tensor_to_object(tensor, tensor_size):
+    buf = tensor.numpy().tobytes()[:tensor_size]
+    return _unpickler(io.BytesIO(buf)).load()
+
+def all_gather_object(object_list, obj, group=None):
+    """
+    Gathers picklable objects from the whole group into a list. Similar to
+    :func:`all_gather`, but Python objects can be passed in. Note that the object
+    must be picklable in order to be gathered.
+    Args:
+        object_list (list[Any]): Output list. It should be correctly sized as the
+            size of the group for this collective and will contain the output.
+        object (Any): Pickable Python object to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+    Returns:
+        None. If the calling rank is part of this group, the output of the
+        collective will be populated into the input ``object_list``. If the
+        calling rank is not part of the group, the passed in ``object_list`` will
+        be unmodified.
+    .. note:: Note that this API differs slightly from the :func:`all_gather`
+        collective since it does not provide an ``async_op`` handle and thus
+        will be a blocking call.
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+    .. warning::
+        :func:`all_gather_object` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> # Assumes world_size of 3.
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> output
+        ['foo', 12, {1: 2}]
+    """
+    if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather_object")
+        return
+
+    input_tensor, local_size = _object_to_tensor(obj)
+    current_device = torch.device("cpu")
+    # only support hccl backend
+    current_device = torch.device("npu", torch.npu.current_device())
+    input_tensor = input_tensor.to(current_device)
+    # warnning: HCCL does not support torch.long, change the dtype
+    # from torch.long(torch.int64) to torch.int32
+    local_size = local_size.to(current_device).to(dtype=torch.int32)
+
+    # Gather all local sizes. This is so that we can find the max size, and index
+    # until the correct size when deserializing the tensors.
+    group_size = get_world_size(group=group)
+    # warnning: HCCL does not support torch.long, change the dtype
+    # from torch.long(torch.int64) to torch.int32
+    object_sizes_tensor = torch.zeros(
+        group_size, dtype=torch.int32, device=current_device
+    )
+    object_size_list = [
+        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
+    ]
+    # Allgather tensor sizes
+    all_gather(object_size_list, local_size, group=group)
+    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
+    # Resize tensor to max size across all ranks.
+    # Change the dtype from torch.uint8 to torch.int16
+    input_tensor = input_tensor.resize_(max_object_size).to(dtype=torch.int16)
+    coalesced_output_tensor = torch.empty(
+        max_object_size * group_size, dtype=torch.int16, device=current_device
+    )
+    # Output tensors are nonoverlapping views of coalesced_output_tensor
+    output_tensors = [
+        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
+        for i in range(group_size)
+    ]
+    all_gather(output_tensors, input_tensor, group=group)
+    # Deserialize outputs back to object.
+    for i, tensor in enumerate(output_tensors):
+        tensor = tensor.type(torch.uint8)
+        if tensor.device != torch.device("cpu"):
+            tensor = tensor.cpu()
+        tensor_size = object_size_list[i]
+        object_list[i] = _tensor_to_object(tensor, tensor_size)
+
