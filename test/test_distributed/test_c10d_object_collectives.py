@@ -74,6 +74,16 @@ class TestObjectCollectives(TestCase):
         dist.all_gather_object(output, gather_objects[dist.get_rank()])
         self.assertEqual(output, gather_objects)
 
+    def test_broadcast_object_list(self):
+        self.dist_init()
+        expected_objects = ["foo", 12, {1: 2}, ["foo", 12, {1:2}]]
+        if dist.get_rank() == 0:
+            objects = expected_objects # any picklable object
+        else:
+            objects = [None, None, None, None]
+        dist.broadcast_object_list(objects, src=0)
+        self.assertEqual(objects, expected_objects)
+
 
 if __name__ == "__main__":
     run_tests()

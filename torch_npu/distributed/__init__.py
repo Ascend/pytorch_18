@@ -14,7 +14,8 @@ __all__ = [
     "Reducer", "_DEFAULT_FIRST_BUCKET_BYTES", "_register_comm_hook", "_register_builtin_comm_hook",
     "_broadcast_coalesced", "_compute_bucket_assignment_by_size", "_get_global_rank",
     "_verify_params_across_processes", "DebugLevel", "get_debug_level", "set_debug_level",
-    "_create_process_group_wrapper", "_rank_not_in_group", "Logger", "all_gather_object"
+    "_create_process_group_wrapper", "_rank_not_in_group", "Logger", "all_gather_object",
+    "broadcast_object_list"
 ]
 
 
@@ -52,7 +53,7 @@ from .distributed_c10d import (
     reduce, all_gather, all_gather_coalesced, gather, scatter, reduce_scatter,
     all_to_all_single, all_to_all, barrier, new_group, ProcessGroupHCCL, _get_global_rank, DebugLevel,
     get_debug_level, set_debug_level, set_debug_level_from_env, _create_process_group_wrapper,
-    _rank_not_in_group, Logger, all_gather_object
+    _rank_not_in_group, Logger, all_gather_object, broadcast_object_list
 )
 
 set_debug_level_from_env()
